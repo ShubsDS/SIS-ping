@@ -1,0 +1,25 @@
+[Unit]
+Description=SIS-ping: watch a UVA SIS class for an open seat
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Path to the project on the remote server. Edit both lines to match.
+WorkingDirectory=%h/SIS-ping
+ExecStart=%h/SIS-ping/venv/bin/python %h/SIS-ping/watcher.py
+
+# Restart on any exit. 30s gap avoids hammering SIS if something's wrong.
+Restart=always
+RestartSec=30s
+
+# Reasonable resource caps for a tiny poller.
+MemoryMax=200M
+TasksMax=64
+
+# Keep logs in journalctl; watcher.log handles on-disk rotation.
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target
