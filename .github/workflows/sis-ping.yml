@@ -1,0 +1,42 @@
+name: sis-ping
+
+# Each run polls every POLL_INTERVAL seconds for ~5h50m, then exits before
+# GitHub's 6h job limit. The hourly cron queues the next run behind the
+# current one (see `concurrency`), so it takes over within seconds.
+on:
+  schedule:
+    - cron: "17 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: sis-ping
+  cancel-in-progress: false
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      - name: Watch
+        run: python watcher.py
+        env:
+          SIS_TERM: "1272"           # Spring 2027
+          CLASS_NBR: "16289"         # CS 4771-001 Reinforcement Learning
+          MNEMONIC: "CS 4771"
+          POLL_INTERVAL: "180"
+          MAX_RUNTIME: "21000"       # 5h50m
+          LOG_FILE: ""
+          # Only confirm startup on manual runs, not every 6h relaunch.
+          SEND_STARTUP_EMAIL: ${{ github.event_name == 'workflow_dispatch' }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_APP_PASSWORD: ${{ secrets.SMTP_APP_PASSWORD }}
+          EMAIL_TO: ${{ secrets.EMAIL_TO }}

@@ -45,8 +45,12 @@ def load_config() -> dict:
     values: dict = {}
     if env_file.exists():
         values.update({k: v for k, v in dotenv_values(env_file).items() if v is not None})
+    # Legacy: TERM in .env. Never read TERM from the process env -- that's the
+    # shell's terminal type (e.g. "xterm-256color"), not a SIS term code.
+    if "TERM" in values and "SIS_TERM" not in values:
+        values["SIS_TERM"] = values["TERM"]
     for key in (
-        "TERM",
+        "SIS_TERM",
         "CLASS_NBR",
         "MNEMONIC",
         "POLL_INTERVAL",
@@ -58,6 +62,7 @@ def load_config() -> dict:
         "SMTP_APP_PASSWORD",
         "LOG_FILE",
         "SEND_STARTUP_EMAIL",
+        "MAX_RUNTIME",
     ):
         if key in os.environ and os.environ[key] != "":
             values[key] = os.environ[key]
@@ -81,10 +86,12 @@ async def run_once(term: str, class_nbr: int) -> ClassAvailability:
 
 
 async def watch(cfg: dict, stop: asyncio.Event) -> int:
-    term = require(cfg, "TERM")
+    term = require(cfg, "SIS_TERM")
     class_nbr = int(require(cfg, "CLASS_NBR"))
     mnemonic = cfg.get("MNEMONIC")
     poll_interval = int(cfg.get("POLL_INTERVAL", "60"))
+    # Optional: exit cleanly after this many seconds (for CI runners with job time limits).
+    max_runtime = int(cfg.get("MAX_RUNTIME") or 0)
 
     if poll_interval < 30:
         LOG.warning(
@@ -130,6 +137,9 @@ async def watch(cfg: dict, stop: asyncio.Event) -> int:
         backoff = poll_interval
         max_backoff = 600
 
+        if max_runtime > 0:
+            asyncio.get_running_loop().call_later(max_runtime, stop.set)
+
         while not stop.is_set():
             # Sleep with jitter, but wake up early if we're asked to stop.
             sleep_for = max(5, poll_interval + random.uniform(-5, 5))
@@ -173,7 +183,7 @@ async def watch(cfg: dict, stop: asyncio.Event) -> int:
                 LOG.info("Seat filled again; re-arming alert")
                 alerted = False
 
-        LOG.info("Stop signal received; exiting cleanly")
+        LOG.info("Stop requested; exiting cleanly")
         return 0
     finally:
         await client.close()
@@ -192,7 +202,7 @@ def main() -> int:
     setup_logging(cfg.get("LOG_FILE"))
 
     if args.check_only:
-        term = require(cfg, "TERM")
+        term = require(cfg, "SIS_TERM")
         class_nbr = int(require(cfg, "CLASS_NBR"))
         info = asyncio.run(run_once(term=term, class_nbr=class_nbr))
         print(

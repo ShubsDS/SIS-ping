@@ -7,7 +7,8 @@ you the moment a seat opens in a specific class.
 - **How:** one `aiohttp` session with auto-refreshing SIS session cookies,
   jittered polling, exponential backoff on failures.
 - **Delivery:** Gmail SMTP (App Password, STARTTLS).
-- **Deployment:** systemd user service with `Restart=always`.
+- **Deployment:** GitHub Actions (no server needed), or a systemd user
+  service with `Restart=always`.
 
 ---
 
@@ -31,7 +32,7 @@ source venv/bin/activate
 pip install -r requirements.txt
 
 cp .env.example .env
-$EDITOR .env          # fill in TERM, CLASS_NBR, SMTP_*, EMAIL_TO
+$EDITOR .env          # fill in SIS_TERM, CLASS_NBR, SMTP_*, EMAIL_TO
 ```
 
 Then do a one-shot check to confirm the config is good:
@@ -62,7 +63,37 @@ watching..."). Leave it running — it will email you again when
 
 ---
 
-## 2. Deploy to a remote server (systemd, survives logout + reboots)
+## 2. Run on GitHub Actions (no server, works with your laptop off)
+
+`.github/workflows/sis-ping.yml` runs the watcher on GitHub's runners. Each
+run polls for ~5h50m and exits before the 6h job limit; an hourly cron
+queues the next run behind it, so coverage is continuous. The class, term
+and interval are set in the workflow's `env:` block.
+
+One-time setup:
+
+1. **Make the repo public** (Settings → General → Danger Zone). Actions is
+   free and unlimited for public repos; a private repo's 2,000 free
+   minutes/month would run out in ~2 days. Secrets stay private either way.
+2. **Add secrets** (Settings → Secrets and variables → Actions → New
+   repository secret): `SMTP_USER`, `SMTP_APP_PASSWORD`, `EMAIL_TO`.
+3. **Start it:** Actions → sis-ping → Run workflow. Manual runs send the
+   startup email, so you know it's alive and SIS isn't blocking GitHub's IPs.
+   After that the cron keeps it going.
+
+Notes:
+
+- If a seat is still open when a new run starts (every ~6h), you'll get
+  another alert. Treat it as a reminder.
+- If SIS starts blocking GitHub's IPs, runs fail on the first fetch and
+  GitHub emails you the failure.
+- GitHub turns off scheduled workflows in public repos after **60 days with
+  no commits**. Push any commit, or re-enable it in the Actions tab.
+- To stop it: Actions → sis-ping → ⋯ → Disable workflow.
+
+---
+
+## 3. Deploy to a remote server (systemd, survives logout + reboots)
 
 On any Linux box (Ubuntu/Debian shown) with your SSH access:
 
@@ -110,7 +141,7 @@ systemctl --user disable sis-ping
 
 ---
 
-## 3. Alternative: `tmux` / `nohup` (no systemd needed)
+## 4. Alternative: `tmux` / `nohup` (no systemd needed)
 
 If you don't have systemd (e.g. a shared host) or just want the simplest
 thing possible:
@@ -132,13 +163,13 @@ you want up for months.
 
 ---
 
-## 4. Configuration reference
+## 5. Configuration reference
 
 All settings live in `.env` (see `.env.example` for the template).
 
 | Key | Required | Default | Notes |
 |---|---|---|---|
-| `TERM` | yes | — | `1268` for Fall 2026 |
+| `SIS_TERM` | yes | — | `1268` Fall 2026, `1272` Spring 2027 |
 | `CLASS_NBR` | yes | — | 5-digit class number |
 | `MNEMONIC` | no | — | Friendly label for email subject |
 | `POLL_INTERVAL` | no | `60` | Seconds between checks |
@@ -150,10 +181,11 @@ All settings live in `.env` (see `.env.example` for the template).
 | `EMAIL_FROM` | no | = `SMTP_USER` | For Gmail, keep as default |
 | `LOG_FILE` | no | `watcher.log` | Rotating, 2 MB × 3 files |
 | `SEND_STARTUP_EMAIL` | no | `true` | Confirms the watcher is alive |
+| `MAX_RUNTIME` | no | `0` | Exit after N seconds (0 = forever) |
 
 ---
 
-## 5. How it handles real-world flakiness
+## 6. How it handles real-world flakiness
 
 - **Session cookies:** SIS returns a CSA5 "Access Interrupted" page for
   requests without a session. The client hits `psp/ihprd/?cmd=login`
@@ -167,7 +199,7 @@ All settings live in `.env` (see `.env.example` for the template).
 - **SIGTERM:** clean shutdown (systemd's `stop` exits the loop promptly,
   no orphaned connections).
 
-## 6. Troubleshooting
+## 7. Troubleshooting
 
 | Symptom | Likely cause |
 |---|---|
