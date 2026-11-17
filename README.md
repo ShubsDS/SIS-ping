@@ -66,8 +66,10 @@ watching..."). Leave it running — it will email you again when
 ## 2. Run on GitHub Actions (no server, works with your laptop off)
 
 `.github/workflows/sis-ping.yml` runs the watcher on GitHub's runners. Each
-run polls for ~5h50m and exits before the 6h job limit; an hourly cron
-queues the next run behind it, so coverage is continuous. The class, term
+run polls for ~5h50m, exits before the 6h job limit, then dispatches the
+next run itself, so coverage is continuous. A cron every 15 minutes is only
+a backup: GitHub delays and drops scheduled triggers, so it can't be relied
+on for the hand-off, but it restarts the chain if a run fails or is cancelled. The class, term
 and interval are set in the workflow's `env:` block.
 
 One-time setup:
@@ -79,7 +81,7 @@ One-time setup:
    repository secret): `SMTP_USER`, `SMTP_APP_PASSWORD`, `EMAIL_TO`.
 3. **Start it:** Actions → sis-ping → Run workflow. Manual runs send the
    startup email, so you know it's alive and SIS isn't blocking GitHub's IPs.
-   After that the cron keeps it going.
+   After that each run relaunches the next (without the email).
 
 Notes:
 

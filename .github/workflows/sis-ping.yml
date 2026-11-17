@@ -1,16 +1,28 @@
 name: sis-ping
 
-# Each run polls every POLL_INTERVAL seconds for ~5h50m, then exits before
-# GitHub's 6h job limit. The hourly cron queues the next run behind the
-# current one (see `concurrency`), so it takes over within seconds.
+# Each run polls every POLL_INTERVAL seconds for ~5h50m, exits before
+# GitHub's 6h job limit, then dispatches its own successor, which starts
+# within seconds. GitHub delays and drops scheduled triggers, so the cron is
+# only a backup that restarts the chain if a run fails or is cancelled.
 on:
   schedule:
-    - cron: "17 * * * *"
+    - cron: "*/15 * * * *"
   workflow_dispatch:
+    inputs:
+      startup_email:
+        description: Send a startup email
+        type: boolean
+        default: true
 
+# A cron run that fires while a run is in progress waits here; newer pending
+# runs replace older ones, so at most one is ever queued.
 concurrency:
   group: sis-ping
   cancel-in-progress: false
+
+permissions:
+  contents: read
+  actions: write   # lets the run dispatch its successor
 
 jobs:
   watch:
@@ -35,8 +47,16 @@ jobs:
           POLL_INTERVAL: "180"
           MAX_RUNTIME: "21000"       # 5h50m
           LOG_FILE: ""
-          # Only confirm startup on manual runs, not every 6h relaunch.
-          SEND_STARTUP_EMAIL: ${{ github.event_name == 'workflow_dispatch' }}
+          # Only confirm startup on manual runs, not on self-relaunches or cron.
+          SEND_STARTUP_EMAIL: ${{ github.event_name == 'workflow_dispatch' && inputs.startup_email }}
           SMTP_USER: ${{ secrets.SMTP_USER }}
           SMTP_APP_PASSWORD: ${{ secrets.SMTP_APP_PASSWORD }}
           EMAIL_TO: ${{ secrets.EMAIL_TO }}
+
+      # Only after a clean exit: a failing watcher shouldn't relaunch in a
+      # tight loop, so the cron picks it back up instead.
+      - name: Relaunch
+        run: gh workflow run sis-ping.yml --ref "$GITHUB_REF_NAME" -f startup_email=false
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
